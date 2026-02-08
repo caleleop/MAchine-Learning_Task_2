@@ -47,6 +47,8 @@ class PreprocessDataset:
         self._pca = None
         self._mms_cols = []
         self._pca_cols = []
+        self._pca_means = None
+        self._pca_input_cols = []
         self.one_hot_train_columns = []
                        
     def one_hot_encode_columns_train(self,train_features:pd.DataFrame) -> pd.DataFrame:
@@ -120,6 +122,9 @@ class PreprocessDataset:
         #pca_dataset = pd.DataFrame()
         #return pca_dataset
         numeric_df = train_features.select_dtypes(include=[np.number])
+        numeric_df = numeric_df.replace([np.inf, -np.inf], np.nan)
+        self._pca_means = numeric_df.mean().fillna(0)
+        numeric_df = numeric_df.fillna(self._pca_means).fillna(0)
         self._pca_cols = list(numeric_df.columns)
         self._pca = PCA(n_components=self.n_components)
         transformed_data = self._pca.fit_transform(numeric_df)
@@ -133,6 +138,10 @@ class PreprocessDataset:
         #return pca_dataset
         #numeric_df = test_features.select_dtypes(include=[np.number])
         numeric_df = test_features[self._pca_cols]
+        numeric_df = numeric_df.replace([np.inf, -np.inf], np.nan)
+        if self._pca_means is None:
+            self._pca_means = numeric_df.mean().fillna(0)
+        numeric_df = numeric_df.fillna(self._pca_means).fillna(0)
         transformed_data = self._pca.transform(numeric_df)
 
         columns = [f"component_{i+1}" for i in range(self.n_components)]
@@ -173,7 +182,10 @@ class PreprocessDataset:
         df = self.one_hot_encode_columns_train(df)
         df = self.min_max_scaled_columns_train(df)
         if self.n_components:
-            df = self.pca_train(df)
+            self._pca_input_cols = [col for col in self.min_max_scale_cols if col in df.columns]
+            if self._pca_input_cols:
+                pca_features = self.pca_train(df[self._pca_input_cols])
+                df = pd.concat([df.drop(columns=self._pca_input_cols), pca_features], axis=1)
         return df
         
           
@@ -194,5 +206,9 @@ class PreprocessDataset:
         df = self.one_hot_encode_columns_test(df)
         df = self.min_max_scaled_columns_test(df)
         if self.n_components:
-            df = self.pca_test(df)
+            if not self._pca_input_cols:
+                self._pca_input_cols = [col for col in self.min_max_scale_cols if col in df.columns]
+            if self._pca_input_cols:
+                pca_features = self.pca_test(df[self._pca_input_cols])
+                df = pd.concat([df.drop(columns=self._pca_input_cols), pca_features], axis=1)
         return df
